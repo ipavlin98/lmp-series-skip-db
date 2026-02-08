@@ -375,10 +375,11 @@
 
 			var active = Lampa.Activity.active();
 
+			var componentName = active.component ? active.component.toLowerCase() : "";
 			if (
 				!active ||
 				!active.component ||
-				active.component.toLowerCase() !== "lamponline"
+				(componentName !== "lamponline" && componentName !== "lampacskaz")
 			) {
 				return;
 			}
