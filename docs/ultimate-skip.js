@@ -2,6 +2,7 @@
 	"use strict";
 
 	const ANISKIP_API = "https://api.aniskip.com/v2/skip-times";
+	const ANILIST_API = "https://graphql.anilist.co";
 	const JIKAN_API = "https://api.jikan.moe/v4/anime";
 	const GITHUB_DB_URL = "https://raw.githubusercontent.com/ipavlin98/lmp-series-skip-db/refs/heads/main/database/";
 	const SKIP_TYPES = ["op", "ed", "recap"];
@@ -110,7 +111,81 @@
 		}
 	}
 
-	async function searchMalId(title, seas, year) {
+	async function searchMalIdAniList(title, seas, year) {
+		let query = title;
+		if (seas > 1) query += " Season " + seas;
+
+		const graphqlQuery = `query ($search: String) {
+			Page(page: 1, perPage: 10) {
+				media(search: $search, type: ANIME) {
+					idMal
+					title { romaji english native }
+					seasonYear
+					synonyms
+				}
+			}
+		}`;
+
+		try {
+			const response = await fetch(ANILIST_API, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "Accept": "application/json" },
+				body: JSON.stringify({ query: graphqlQuery, variables: { search: query } })
+			});
+
+			if (!response.ok) return null;
+			const json = await response.json();
+			const results = json.data && json.data.Page && json.data.Page.media;
+			if (!results || results.length === 0) return null;
+
+			const withMalId = results.filter((item) => item.idMal);
+			if (withMalId.length === 0) return null;
+
+			if (year && seas === 1) {
+				const match = withMalId.find((item) => String(item.seasonYear) === String(year));
+				if (match) return match.idMal;
+			}
+
+			if (seas > 1) {
+				const ordinal =
+					seas +
+					(seas % 10 === 1 && seas !== 11
+						? "st"
+						: seas % 10 === 2 && seas !== 12
+							? "nd"
+							: seas % 10 === 3 && seas !== 13
+								? "rd"
+								: "th");
+				const keywords = [
+					`Season ${seas}`,
+					`${ordinal} Season`,
+					`Season${seas}`
+				];
+
+				const titleMatch = withMalId.find((item) => {
+					const titlesToCheck = [
+						item.title && item.title.romaji,
+						item.title && item.title.english,
+						...(item.synonyms || [])
+					]
+						.filter(Boolean)
+						.map((t) => t.toLowerCase());
+
+					return titlesToCheck.some((t) =>
+						keywords.some((k) => t.includes(k.toLowerCase()))
+					);
+				});
+
+				if (titleMatch) return titleMatch.idMal;
+			}
+
+			return withMalId[0].idMal;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	async function searchMalIdJikan(title, seas, year) {
 		let query = title;
 		if (seas > 1) query += " Season " + seas;
 
@@ -118,6 +193,7 @@
 
 		try {
 			const response = await fetch(url);
+			if (!response.ok) return null;
 			const json = await response.json();
 
 			if (!json.data || json.data.length === 0) return null;
@@ -173,6 +249,12 @@
 		} catch (e) {
 			return null;
 		}
+	}
+
+	async function searchMalId(title, seas, year) {
+		var malId = await searchMalIdAniList(title, seas, year);
+		if (malId) return malId;
+		return await searchMalIdJikan(title, seas, year);
 	}
 
 	async function fetchAniSkipSegments(malId, episode) {
